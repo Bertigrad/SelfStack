@@ -18,7 +18,7 @@ UNDERLINE="\e[4m"
 RESET="\e[0m"  # Color reset
 
 # Define the current script version
-script_version="v0.1.0"
+script_version="v0.1.1"
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
@@ -543,7 +543,13 @@ voice_server_setup_menu() {
     case $voice_choice_setup in
         1)
             clear
-            install_teamspeak # TeamSpeak 3 Installing function
+            if [ "$ts3_installed" = true ]; then
+                echo -e "${RED}${BOLD}TeamSpeak 3 is already installed!${RESET}"
+                sleep 2
+                voice_server_setup_menu
+            else
+                install_teamspeak
+            fi
             ;;
         2)
             clear
