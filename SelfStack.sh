@@ -18,7 +18,7 @@ UNDERLINE="\e[4m"
 RESET="\e[0m"  # Color reset
 
 # Define the current script version
-script_version="v0.1.2"
+script_version="v0.1.3"
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
@@ -563,6 +563,7 @@ voice_server_setup_menu() {
                 voice_server_setup_menu
             else
             install_sinusbot  # SinusBot Installing function
+            fi
             ;;
         4)
             clear
@@ -572,6 +573,7 @@ voice_server_setup_menu() {
                 voice_server_setup_menu
             else
             install_audiobot  # Audiobot Installing function
+            fi
             ;;
         5)
             main_menu  # Return to main menu
