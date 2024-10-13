@@ -18,7 +18,7 @@ UNDERLINE="\e[4m"
 RESET="\e[0m"  # Color reset
 
 # Define the current script version
-script_version="v0.1.1"
+script_version="v0.1.2"
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
@@ -557,10 +557,20 @@ voice_server_setup_menu() {
             ;;
         3)
             clear
+            if [ "$sinusbot_installed" = true ]; then
+                echo -e "${RED}${BOLD}SinusBot is already installed!${RESET}"
+                sleep 2
+                voice_server_setup_menu
+            else
             install_sinusbot  # SinusBot Installing function
             ;;
         4)
             clear
+            if [ "$audiobot_installed" = true ]; then
+                echo -e "${RED}${BOLD}Audiobot is already installed!${RESET}"
+                sleep 2
+                voice_server_setup_menu
+            else
             install_audiobot  # Audiobot Installing function
             ;;
         5)
