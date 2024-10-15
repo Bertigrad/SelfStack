@@ -1,4 +1,5 @@
-# TeamSpeak & Sinusbot & Audiobot Setup Script
+# Multi-Service Setup Script (TeamSpeak, SinusBot, AudioBot, Ente Server & More)
+
 
 This script is designed to easily set up and manage TeamSpeak 3, SinusBot, and TS3AudioBot on a Linux server. It automates the installation, configuration, and management of these services, making it easier to deploy and maintain voice communication services.
 
