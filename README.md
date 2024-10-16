@@ -14,6 +14,7 @@ Please make sure you fully understand the changes that this script will make to 
 - **TeamSpeak 3** installation and configuration
 - **SinusBot** installation, configuration, and service management
 - **TS3AudioBot** installation, initial setup, and configuration
+- **Ente Server** installation, configuration, and service management
 - Service management (start, stop, restart)
 - Automatic update check for the script itself
 - Easily configurable and user-friendly interface
