@@ -18,7 +18,7 @@ UNDERLINE="\e[4m"
 RESET="\e[0m"  # Color reset
 
 # Define the current script version
-script_version="v0.1.3"
+script_version="v0.1.7"
 
 SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
 
@@ -98,6 +98,16 @@ check_audiobot_installed() {
     else
         audiobot_installed=false
         audiobot_status="(Not Installed)"
+    fi
+}
+
+check_ente_server_installed() {
+    if [ -d "/opt/ente-server" ] && [ -f "/opt/ente-server/server/compose.yaml" ]; then
+        ente_server_installed=true
+        ente_server_status="(Installed)"
+    else
+        ente_server_installed=false
+        ente_server_status="(Not Installed)"
     fi
 }
 
@@ -474,6 +484,397 @@ install_audiobot() {
     echo "To log in to the panel, send a private message to the bot in your Teamspeak server."
     echo "Use the command (!api token) and then enter the token you receive in the panel."
 }
+
+install_docker() {
+    echo -e "${YELLOW}Checking operating system...${RESET}"
+    os=$(grep ^ID= /etc/os-release | cut -d'=' -f2)
+
+    if [[ "$os" == "ubuntu" ]]; then
+        echo -e "${YELLOW}Detected Ubuntu, starting Docker installation for Ubuntu...${RESET}"
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates curl
+        sudo install -m 0755 -d /etc/apt/keyrings
+        sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+        
+        # Add Docker repository for Ubuntu
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+          $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+        
+    elif [[ "$os" == "debian" ]]; then
+        echo -e "${YELLOW}Detected Debian, starting Docker installation for Debian...${RESET}"
+        sudo apt-get update
+        sudo apt-get install -y ca-certificates curl
+        sudo install -m 0755 -d /etc/apt/keyrings
+        sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+        sudo chmod a+r /etc/apt/keyrings/docker.asc
+        
+        # Add Docker repository for Debian
+        echo \
+          "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+          $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+          sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          
+        sudo apt-get update
+        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    else
+        echo -e "${RED}Unsupported operating system. Only Ubuntu and Debian are supported.${RESET}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}Docker installation completed!${RESET}"
+}
+
+
+install_ente_server() {
+    echo -e "${YELLOW}Starting Ente Server installation...${RESET}"
+
+    # Install Docker
+    echo -e "${YELLOW}Installing Docker...${RESET}"
+    install_docker
+
+    # Create and navigate to the ente-server directory
+    echo -e "${YELLOW}Creating and navigating to ente-server directory...${RESET}"
+    mkdir -p /opt/ente-server
+    cd /opt/ente-server
+
+    # Initialize Git repository and pull the server directory
+    echo -e "${YELLOW}Initializing Git repository and pulling server directory...${RESET}"
+    git init
+    git remote add origin https://github.com/ente-io/ente.git
+    git config core.sparseCheckout true
+    echo "server/*" >> .git/info/sparse-checkout
+    git pull origin main
+
+    # Ask the user for PostgreSQL username and password
+    echo -e "${YELLOW}Please enter PostgreSQL username (pguser): ${RESET}"
+    read pguser
+    echo -e "${YELLOW}Please enter PostgreSQL password (pgpass): ${RESET}"
+    read pgpass
+
+    # Ask the user for MinIO credentials
+    echo -e "${YELLOW}Please enter MinIO root username: ${RESET}"
+    read minio_user
+    echo -e "${YELLOW}Please enter MinIO root password: ${RESET}"
+    read minio_pass
+
+    # Update the Docker compose.yaml file with the provided details
+    echo -e "${YELLOW}Updating Docker compose.yaml file with provided details...${RESET}"
+    sed -i "s/POSTGRES_USER: .*/POSTGRES_USER: ${pguser}/g" server/compose.yaml
+    sed -i "s/"pguser"/"${pguser}"/g" server/compose.yaml
+    
+    sed -i "s/POSTGRES_PASSWORD: .*/POSTGRES_PASSWORD: ${pgpass}/g" server/compose.yaml
+    sed -i "s/MINIO_ROOT_USER:.*/MINIO_ROOT_USER: ${minio_user}/g" server/compose.yaml
+    sed -i "s/MINIO_ROOT_PASSWORD:.*/MINIO_ROOT_PASSWORD: ${minio_pass}/g" server/compose.yaml
+
+    # Ask the user for permission to fetch the IP address using curl
+    read -p "Do you allow the script to automatically fetch your IP address using curl? (y/n): " allow_curl
+
+    if [[ "$allow_curl" == "y" || "$allow_curl" == "Y" ]]; then
+    # Automatically fetch IP address using curl
+    ipv4_address=$(curl -4 -s ifconfig.me)
+    else
+    # Ask the user to manually enter the IP address
+    read -p "Please enter your server's IP address manually: " ipv4_address
+
+    # Validate the format of the IP address
+    if [[ ! $ipv4_address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "${RED}Invalid IP address format! Please enter a valid IPv4 address.${RESET}"
+        exit 1
+    fi
+    
+    echo -e "${YELLOW}You entered the IP address: ${ipv4_address}${RESET}"
+    fi
+
+    # Update the MinIO endpoint with the server's IP address
+    echo -e "${YELLOW}Updating MinIO endpoint with server IP address: ${ipv4_address}${RESET}"
+    sed -i "s/localhost:3200/${ipv4_address}:3200/g" server/scripts/compose/credentials.yaml
+
+    # Update the credentials.yaml file with pguser, pgpass, and MinIO credentials
+    echo -e "${YELLOW}Updating credentials.yaml with pguser, pgpass, and MinIO credentials...${RESET}"
+    sed -i "s/pguser/${pguser}/g" server/scripts/compose/credentials.yaml
+    sed -i "s/pgpass/${pgpass}/g" server/scripts/compose/credentials.yaml
+    sed -i "s/key: .*/key: ${minio_user}/g" server/scripts/compose/credentials.yaml
+    sed -i "s/secret: .*/secret: ${minio_pass}/g" server/scripts/compose/credentials.yaml
+    sed -i "s/testtest/${minio_pass}/g" server/scripts/compose/minio-provision.sh
+    sed -i "s/test/${minio_user}/g" server/scripts/compose/minio-provision.sh
+
+    # Start the Ente Server using Docker Compose
+    echo -e "${YELLOW}Starting Ente Server with Docker Compose...${RESET}"
+    docker compose -f server/compose.yaml up -d
+
+    # Inform the user to register on the Ente application
+    clear
+    echo -e "${YELLOW}${BOLD}Please register on the Ente application to proceed.${RESET}"
+    echo -e "${YELLOW}Your server IP address is: ${ipv4_address}:8080${RESET}"
+
+    # Wait for verification code and display it
+    echo -e "${YELLOW}Waiting for verification code...${RESET}"
+    while true; do
+        verification_code=$(docker compose -f server/compose.yaml logs | grep -oP "Verification code: \K\d+")
+        if [ -n "$verification_code" ]; then
+            echo -e "${GREEN}${BOLD}Verification code found: $verification_code ${RESET}"
+            break
+        fi
+        sleep 5
+    done
+
+    # Ask the user if they want to assign 1TB of storage to the first user
+    read -p "Do you want to assign 1TB of storage to the first user? (y/n): " assign_storage
+
+    if [[ "$assign_storage" == "y" || "$assign_storage" == "Y" ]]; then
+    echo -e "${YELLOW}Assigning 1TB of storage to the first user...${RESET}"
+    
+    # Execute the SQL command inside the PostgreSQL container
+    docker compose -f server/compose.yaml exec -i postgres psql -U $pguser -d ente_db -c "INSERT INTO storage_bonus (bonus_id, user_id, storage, type, valid_till) VALUES ('self-hosted-myself', (SELECT user_id FROM users LIMIT 1), 1099511627776, 'ADD_ON_SUPPORT', 0)"
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}1TB of storage successfully assigned to the first user.${RESET}"
+    else
+        echo -e "${RED}Failed to assign storage. Please check the logs for more details.${RESET}"
+    fi
+    else
+    echo -e "${YELLOW}1TB storage was not assigned.${RESET}"
+    fi
+
+    echo -e "${GREEN}Ente server setup is complete. You can now access it via your IP address: ${ipv4_address}:8080 ${RESET}"
+}
+
+ente_server_delete() {
+    clear
+    echo -e "${RED}${BOLD}Critical Warning: You are about to permanently delete the Ente Server installation.${RESET}"
+    echo -e "${YELLOW}This action will remove all Docker containers, images, volumes, and configuration files associated with Ente Server.${RESET}"
+    echo -e "${YELLOW}All data, including any custom configurations, user data, and settings, will be permanently lost and cannot be recovered unless you have backups.${RESET}"
+    echo -e "${YELLOW}${BOLD}Important:${RESET} By proceeding with this operation, you acknowledge that you fully understand the consequences of this action.${RESET}"
+    echo -e "${YELLOW}We are not responsible for any data loss, downtime, or issues that may arise as a result of this operation.${RESET}"
+    echo -e "${YELLOW}${BOLD}Do you really want to proceed with this irreversible action? (y/n)${RESET}"
+
+    # Ask for user confirmation
+    read -p "(y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo -e "${RED}Delete operation canceled by the user.${RESET}"
+        return
+    fi
+
+    echo -e "${YELLOW}Stopping and removing Ente Server Docker containers...${RESET}"
+    
+    docker compose -f /opt/ente-server/server/compose.yaml down
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Docker containers stopped and removed successfully.${RESET}"
+    else
+        echo -e "${RED}Failed to stop or remove Docker containers.${RESET}"
+        return
+    fi
+
+    echo -e "${YELLOW}Removing Docker images...${RESET}"
+    
+    docker rmi server-museum minio/minio minio/mc alpine/socat postgres
+
+    echo -e "${YELLOW}Removing Docker volumes...${RESET}"
+    
+    docker volume rm server_postgres-data server_minio-data server_custom-logs
+
+    echo -e "${YELLOW}Deleting Ente Server files and directories...${RESET}"
+    
+    rm -rf /opt/ente-server
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Ente Server deleted successfully.${RESET}"
+    else
+        echo -e "${RED}Failed to delete Ente Server files.${RESET}"
+    fi
+}
+
+
+ente_server_update() {
+    echo -e "${YELLOW}${BOLD}Warning:${RESET}"
+    echo -e "${YELLOW}By proceeding with the update, you agree that any potential issues or data loss are not our responsibility.${RESET}"
+    echo -e "${YELLOW}Please ensure you have backups of your data and understand that this process may affect your existing system.${RESET}"
+    echo -e "${YELLOW}Do you accept this risk and wish to continue? (y/n)${RESET}"
+
+    # Ask for user confirmation
+    read -p "(y/n): " confirm
+    if [[ "$confirm" != "y" ]]; then
+        echo -e "${RED}Update canceled by the user.${RESET}"
+        return
+    fi
+
+    echo -e "${YELLOW}Updating Ente Server...${RESET}"
+
+    echo -e "${YELLOW}Backing up configuration files...${RESET}"
+    cp /opt/ente-server/server/compose.yaml /opt/ente-server/server/compose.yaml.bak
+    cp /opt/ente-server/server/scripts/compose/credentials.yaml /opt/ente-server/server/scripts/compose/credentials.yaml.bak
+    cp /opt/ente-server/server/scripts/compose/minio-provision.sh /opt/ente-server/server/scripts/compose/minio-provision.sh.bak
+
+    
+    cd /opt/ente-server
+    git fetch origin
+    git reset --hard origin/main
+    docker compose -f server/compose.yaml pull
+    docker compose -f server/compose.yaml up -d 
+
+    
+    echo -e "${YELLOW}Restoring configuration files...${RESET}"
+    mv /opt/ente-server/server/compose.yaml.bak /opt/ente-server/server/compose.yaml
+    mv /opt/ente-server/server/scripts/compose/credentials.yaml.bak /opt/ente-server/server/scripts/compose/credentials.yaml
+    mv /opt/ente-server/server/scripts/compose/minio-provision.sh.bak /opt/ente-server/server/scripts/compose/minio-provision.sh
+
+    echo -e "${YELLOW}Restarting Ente Server...${RESET}"
+    docker compose -f server/compose.yaml up -d
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Ente Server updated and restarted successfully.${RESET}"
+    else
+        echo -e "${RED}Failed to update Ente Server.${RESET}"
+    fi
+}
+
+ente_server_start() {
+    echo -e "${YELLOW}Starting Ente Server...${RESET}"
+    docker compose -f /opt/ente-server/server/compose.yaml start
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Ente Server started successfully.${RESET}"
+    else
+        echo -e "${RED}Failed to start Ente Server.${RESET}"
+    fi
+}
+
+ente_server_stop() {
+    echo -e "${YELLOW}Stopping Ente Server...${RESET}"
+    docker compose -f /opt/ente-server/server/compose.yaml stop
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Ente Server stopped successfully.${RESET}"
+    else
+        echo -e "${RED}Failed to stop Ente Server.${RESET}"
+    fi
+}
+
+ente_server_restart() {
+    echo -e "${YELLOW}Restarting Ente Server...${RESET}"
+    docker compose -f /opt/ente-server/server/compose.yaml restart
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Ente Server restarted successfully.${RESET}"
+    else
+        echo -e "${RED}Failed to restart Ente Server.${RESET}"
+    fi
+}
+
+ente_server_manage_menu() {
+
+    check_ente_server_installed
+
+    clear
+    echo -e "${CYAN}${BOLD}**********************************${RESET}"
+    echo -e "${CYAN}${BOLD}*                                *${RESET}"
+    echo -e "${CYAN}${BOLD}*       ${GREEN}Ente Server Manage${CYAN}       *${RESET}"
+    echo -e "${CYAN}${BOLD}*                                *${RESET}"
+    echo -e "${CYAN}${BOLD}**********************************${RESET}"
+    echo ""
+    echo -e "${YELLOW}${BOLD}>> Select Ente Server operation:${RESET}"
+    echo ""
+    echo -e "${BLUE}${BOLD}1)${RESET} ${WHITE}Setup Ente Server ${RED}${ente_server_status} ${RESET}"
+    echo -e "${BLUE}${BOLD}2)${RESET} ${WHITE}Start Ente Server${RESET}"
+    echo -e "${BLUE}${BOLD}3)${RESET} ${WHITE}Stop Ente Server${RESET}"
+    echo -e "${BLUE}${BOLD}4)${RESET} ${WHITE}Restart Ente Server${RESET}"
+    echo -e "${BLUE}${BOLD}5)${RESET} ${WHITE}Update Ente Server${RESET}"
+    echo -e "${BLUE}${BOLD}6)${RESET} ${WHITE}Delete Ente Server${RESET}"
+    echo -e "${BLUE}${BOLD}7)${RESET} ${WHITE}Go Back to Main Menu${RESET}"
+    echo -e "${BLUE}${BOLD}0)${RESET} ${WHITE}Exit${RESET}"
+    echo ""
+    echo -e "${MAGENTA}${BOLD}Please enter your choice: ${RESET}"
+    read -p "> " ente_manage_choice
+
+    case $ente_manage_choice in
+    1)
+        clear
+        if [ "$ente_server_installed" = true ]; then
+        echo -e "${RED}${BOLD}Ente Server is already installed!${RESET}"
+        sleep 2
+        main_menu
+        else
+        echo -e "${YELLOW}${BOLD}Warning:${RESET}"
+        echo -e "${YELLOW}By proceeding with the installation, you agree that any potential issues or data loss are not our responsibility.${RESET}"
+        echo -e "${YELLOW}Please ensure you have backups of your data and understand that this process may affect your existing system.${RESET}"
+        echo -e "${YELLOW}Do you accept this risk and wish to continue? (y/n)${RESET}"
+        
+        read -p "> " user_agree
+
+        if [[ "$user_agree" == "y" || "$user_agree" == "Y" ]]; then
+            install_ente_server
+        else
+            echo -e "${RED}Installation aborted.${RESET}"
+            sleep 2
+            main_menu
+        fi
+    fi
+        ;;
+    2)
+        if("$ente_server_installed" = true); then
+            ente_server_start
+        else
+            echo -e "${RED}${BOLD}Ente Server is not installed!${RESET}"
+            sleep 2
+            ente_server_manage_menu
+        fi
+        ;;
+    3)
+        if("$ente_server_installed" = true); then
+            ente_server_stop
+        else
+            echo -e "${RED}${BOLD}Ente Server is not installed!${RESET}"
+            sleep 2
+            ente_server_manage_menu
+        fi
+        ;;
+    4)
+        if("$ente_server_installed" = true); then
+            ente_server_restart
+        else
+            echo -e "${RED}${BOLD}Ente Server is not installed!${RESET}"
+            sleep 2
+            ente_server_manage_menu
+        fi
+        ;;
+    5)
+        if("$ente_server_installed" = true); then
+            ente_server_update
+        else
+            echo -e "${RED}${BOLD}Ente Server is not installed!${RESET}"
+            sleep 2
+            ente_server_manage_menu
+        fi
+        ;;
+    6)
+        if("$ente_server_installed" = true); then
+            ente_server_delete
+        else
+            echo -e "${RED}${BOLD}Ente Server is not installed!${RESET}"
+            sleep 2
+            ente_server_manage_menu
+        fi
+        ;;
+    7)
+        main_menu
+        ;;
+    0)
+        exit_script
+        ;;
+    *)
+        clear
+        echo -e "${RED}${BOLD}Invalid choice!${RESET} Please enter a valid option [1-6]."
+        ente_server_manage_menu
+        ;;
+    esac
+}
+
+
 
 voice_server_menu(){
     clear
@@ -1026,7 +1427,7 @@ echo ""
 echo -e "${YELLOW}${BOLD}>> Main Menu${RESET}"
 echo ""
 echo -e "${BLUE}${BOLD}1)${RESET} ${WHITE}Voice Servers${RESET}"
-echo -e "${BLUE}${BOLD}2)${RESET} ${WHITE}Setup Web Hosting ${YELLOW}(SOON)${RESET}"
+echo -e "${BLUE}${BOLD}2)${RESET} ${WHITE}Ente.io(Photos and Authy)${RESET}"
 echo -e "${BLUE}${BOLD}3)${RESET} ${WHITE}Setup Database Server ${YELLOW}(SOON)${RESET}"
 echo -e "${BLUE}${BOLD}4)${RESET} ${WHITE}Mail Server ${YELLOW}(SOON)${RESET}"
 echo -e "${BLUE}${BOLD}0)${RESET} ${WHITE}Exit${RESET}"
@@ -1039,6 +1440,9 @@ case $choice in
     1)
         voice_server_menu
         ;;
+    2)
+        ente_server_manage_menu
+    ;;
     0)
         exit_script
         ;;
